@@ -1,39 +1,54 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
-	"golang.zx2c4.com/wireguard/wgctrl"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
-	"log"
+	"net"
 )
 
+func handleConnection(conn net.Conn) {
+	defer conn.Close()
+	fmt.Println("Client connected:", conn.RemoteAddr())
+
+	buffer := make([]byte, 1024)
+	for {
+		n, err := conn.Read(buffer)
+		if err != nil {
+			fmt.Println("Error reading from client:", err)
+			return
+		}
+		fmt.Println("Received from client:", string(buffer[:n]))
+
+		_, err = conn.Write(buffer[:n])
+		if err != nil {
+			fmt.Println("Error writing to client:", err)
+			return
+		}
+	}
+}
+
 func main() {
-	// Create a WireGuard controller
-	client, err := wgctrl.New()
+	cert, err := tls.LoadX509KeyPair("server.crt", "server.key")
 	if err != nil {
-		log.Fatalf("Failed to create WireGuard controller: %v", err)
+		fmt.Println("Error loading certificate:", err)
+		return
 	}
-	defer client.Close()
 
-	// Generate a new private key for the server
-	serverKey, err := wgtypes.GeneratePrivateKey()
+	config := &tls.Config{Certificates: []tls.Certificate{cert}}
+	listener, err := tls.Listen("tcp", ":8443", config)
 	if err != nil {
-		log.Fatalf("Failed to generate server private key: %v", err)
+		fmt.Println("Error starting server:", err)
+		return
 	}
-	fmt.Printf("Server Private Key: %s\n", serverKey.String())
+	defer listener.Close()
+	fmt.Println("Secure server is listening on port 8443")
 
-	// Define server configuration
-	// Define server configuration
-	port := 51820
-	serverConfig := wgtypes.Config{
-		PrivateKey: &serverKey,
-		ListenPort: &port,
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection:", err)
+			continue
+		}
+		go handleConnection(conn)
 	}
-
-	// Apply the configuration to a WireGuard interface
-	if err := client.ConfigureDevice("wg0", serverConfig); err != nil {
-		log.Fatalf("Failed to configure WireGuard interface: %v", err)
-	}
-
-	fmt.Println("WireGuard VPN server is up and running on interface wg0.")
 }
